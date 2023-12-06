@@ -265,9 +265,10 @@ selected_team_id = teams[teams['ncaa_university_name'] == selected_team]['ncaa_u
 if not pd.isnull(selected_team_id):
     workbook = create_sheet(selected_team_id)
 
-with NamedTemporaryFile() as tmp:
+    with NamedTemporaryFile() as tmp:
      workbook.save(tmp.name)
      data = BytesIO(tmp.read())
+
 
 st.download_button("Download",
      data=data,
