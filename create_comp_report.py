@@ -7,6 +7,8 @@ import streamlit as st
 from dotenv import load_dotenv
 import os
 import pymysql
+from tempfile import NamedTemporaryFile
+from io import BytesIO
 
 load_dotenv()
 
@@ -263,6 +265,13 @@ selected_team_id = teams[teams['ncaa_university_name'] == selected_team]['ncaa_u
 if not pd.isnull(selected_team_id):
     workbook = create_sheet(selected_team_id)
 
-download_button = st.download_button("Download Report", data=workbook, file_name='{}.xlsx'.format(selected_team))
+with NamedTemporaryFile() as tmp:
+     workbook.save(tmp.name)
+     data = BytesIO(tmp.read())
+
+st.download_button("Download",
+     data=data,
+     mime='xlsx',
+     file_name="{} Comp Report.xlsx".format(selected_team))
 
 connection.close()
