@@ -269,10 +269,12 @@ if not pd.isnull(selected_team_id):
      workbook.save(tmp.name)
      data = BytesIO(tmp.read())
 
-
-st.download_button("Download",
+    st.download_button("Download",
      data=data,
      mime='xlsx',
      file_name="{} Comp Report.xlsx".format(selected_team))
+
+
+
 
 connection.close()
