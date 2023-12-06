@@ -263,10 +263,6 @@ selected_team_id = teams[teams['ncaa_university_name'] == selected_team]['ncaa_u
 if not pd.isnull(selected_team_id):
     workbook = create_sheet(selected_team_id)
 
-download_button = st.button("Download Report")
-
-if download_button:
-    workbook.save('{}.xlsx'.format(selected_team))
-    st.write("Report downloaded successfully!")
+download_button = st.download_button("Download Report", data=workbook, file_name='{}.xlsx'.format(selected_team))
 
 connection.close()
