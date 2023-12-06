@@ -5,12 +5,16 @@ from openpyxl.styles import Font, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 import streamlit as st
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 connection = pymysql.connect(
-    host='cse-analytics.mysql.database.azure.com',
-    user='Tyson',
-    password='LcG1*d**',
-    database='cse_db_dev'
+    host=os.getenv("DB_HOST"),
+    user=os.getenv("DB_USERNAME"),
+    password=os.getenv("DB_PASSWORD"),
+    database=os.getenv("DB_NAME")
 )
 
 cursor = connection.cursor()
