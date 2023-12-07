@@ -248,13 +248,15 @@ def create_sheet(team_id, transfers_in, players_leaving):
     columns = [desc[0] for desc in cursor.description]  
     hitting_stats = pd.DataFrame(rows, columns=columns)  
 
+    print(tuple(transfers_in_df['Player'].tolist()))
+
     if len(transfers_in_df) > 0:
         query = """
             SELECT diamond_position_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, Pos, PA, H, HR, BA, SlgPct as SLG, OBPct + SlgPct as OPS, wRAA, wRAA / PA * 100 as wRAA_per_100
             FROM diamond_position_full
             LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_position_full.ncaa_university_name
-            WHERE cycle_id = 6 AND Name IN {} AND PA > 0
-        """.format(tuple(transfers_in_df['Player'].tolist()))
+            WHERE cycle_id = 6 AND concat(first_name, ' ', last_name) IN {} AND PA > 0
+        """.format(tuple(transfers_in_df['Player'].tolist()) if len(transfers_in_df['Player']) > 1 else "('" + transfers_in_df['Player'].tolist()[0] + "')")
 
         cursor.execute(query)
 
@@ -457,8 +459,8 @@ def create_sheet(team_id, transfers_in, players_leaving):
             SELECT diamond_pitching_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, App, IP, W, L, SO, HA, HR_A, WHIP, HA / (BF - BB - HB - SHA - SFA) AS BAA, FIP
             FROM diamond_pitching_full
             LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_pitching_full.ncaa_university_name
-            WHERE cycle_id = 6 AND CONCAT(diamond_pitching_full.first_name, ' ', diamond_pitching_full.last_name) IN {} AND BF > 0
-        """.format(tuple(transfers_in_df['Player'].tolist()))
+            WHERE cycle_id = 6 AND concat(first_name, ' ', last_name) IN {} AND BF > 0
+        """.format(tuple(transfers_in_df['Player'].tolist()) if len(transfers_in_df['Player']) > 1 else "('" + transfers_in_df['Player'].tolist()[0] + "')")
 
         cursor.execute(query)
 
