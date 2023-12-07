@@ -521,27 +521,27 @@ selected_team = st.selectbox("Select Team", sorted_teams)
 
 selected_team_id = teams[teams['ncaa_university_name'] == selected_team]['ncaa_universityID'].tolist()[0]
 
-query = """
-    SELECT CONCAT(first_name, ' ', last_name) as Player
-    FROM diamond_position_full
-    WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
-
-    UNION
-
-    SELECT CONCAT(first_name, ' ', last_name) as Player
-    FROM diamond_pitching_full
-    WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
-
-    ORDER BY SUBSTRING_INDEX(Player, ' ', 1);
-""".format(selected_team, selected_team)
-
-cursor.execute(query)
-
-rows = cursor.fetchall()
-columns = [desc[0] for desc in cursor.description]
-team_roster = pd.DataFrame(rows, columns=columns)
-
 if not pd.isnull(selected_team_id):
+    query = """
+        SELECT CONCAT(first_name, ' ', last_name) as Player
+        FROM diamond_position_full
+        WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
+
+        UNION
+
+        SELECT CONCAT(first_name, ' ', last_name) as Player
+        FROM diamond_pitching_full
+        WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
+
+        ORDER BY SUBSTRING_INDEX(Player, ' ', 1);
+    """.format(selected_team, selected_team)
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    team_roster = pd.DataFrame(rows, columns=columns)
+
     transfers_in = st.multiselect("Transfers In", all_players['Player'].tolist())
     players_leaving = st.multiselect("Players Leaving", team_roster['Player'].tolist())
 
