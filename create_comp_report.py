@@ -20,6 +20,30 @@ connection = pymysql.connect(
 
 cursor = connection.cursor()
 
+# Get list of all players 
+query = """
+    SELECT Player
+    FROM (
+        SELECT CONCAT(first_name, ' ', last_name, ' (', ncaa_university_name, ')') as Player
+        FROM diamond_position_full
+        WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]'
+
+        UNION
+
+        SELECT CONCAT(first_name, ' ', last_name, ' (', ncaa_university_name, ')') as Player
+        FROM diamond_pitching_full
+        WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]'
+    ) AS subquery
+    ORDER BY SUBSTRING_INDEX(Player, ' ', 1);
+"""
+
+cursor.execute(query)
+
+rows = cursor.fetchall()
+columns = [desc[0] for desc in cursor.description]
+all_players = pd.DataFrame(rows, columns=columns)
+
+
 query = """
     SELECT ncaa_university_link.ncaa_university_name, ncaa_university_link.ncaa_universityID
     FROM ncaa_university_link
@@ -31,7 +55,7 @@ rows = cursor.fetchall()
 columns = [desc[0] for desc in cursor.description]
 teams = pd.DataFrame(rows, columns=columns)
 
-def create_sheet(team_id):
+def create_sheet(team_id, transfers_in, players_leaving):
     # Create a new workbook
     workbook = openpyxl.Workbook()
     sheet = workbook.active
@@ -202,14 +226,20 @@ def create_sheet(team_id):
                 cell.fill = openpyxl.styles.PatternFill(start_color='FFF157', end_color='FFF157', fill_type='solid')
                 
 
+    # Extract player and team information
+    players = [entry.split(' (')[0] for entry in transfers_in]
+    teams = [entry.split(' (')[1].replace(')', '') for entry in transfers_in]
+
+    # Create a DataFrame
+    transfers_in_df = pd.DataFrame({'Player': players, 'Team': teams})
+
     # Get the hitting stats for the selected team
 
     query = """
-        SELECT concat(first_name, ' ', last_name) as Name, Yr, Pos, PA, H, HR, BA, SlgPct as SLG, OBPct + SlgPct as OPS, wRAA, wRAA / PA * 100 as wRAA_per_100
+        SELECT diamond_position_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, Pos, PA, H, HR, BA, SlgPct as SLG, OBPct + SlgPct as OPS, wRAA, wRAA / PA * 100 as wRAA_per_100
         FROM diamond_position_full
         LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_position_full.ncaa_university_name
-        WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {}
-        ORDER BY wRAA_per_100 DESC
+        WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {} AND PA > 0
     """.format(team_id)
 
     cursor.execute(query)
@@ -218,6 +248,23 @@ def create_sheet(team_id):
     columns = [desc[0] for desc in cursor.description]  
     hitting_stats = pd.DataFrame(rows, columns=columns)  
 
+    query = """
+        SELECT diamond_position_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, Pos, PA, H, HR, BA, SlgPct as SLG, OBPct + SlgPct as OPS, wRAA, wRAA / PA * 100 as wRAA_per_100
+        FROM diamond_position_full
+        LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_position_full.ncaa_university_name
+        WHERE cycle_id = 6 AND CONCAT(diamond_position_full.first_name, ' ', diamond_position_full.last_name) IN {} AND PA > 0
+    """.format(tuple(transfers_in_df['Player'].tolist()))
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    transfers_in_stats = pd.DataFrame(rows, columns=columns)
+
+    hitting_stats = pd.concat([hitting_stats, transfers_in_stats], ignore_index=True)
+    hitting_stats = pd.merge(hitting_stats, transfers_in_df, left_on=['Name', 'ncaa_university_name'], right_on=['Player', 'Team'], how='left')
+    hitting_stats = hitting_stats.drop(columns=['Team', 'Player'])
+
     hitting_stats['BA'] = hitting_stats['BA'].astype(float).round(3).apply('{:.3f}'.format)
     hitting_stats['SLG'] = hitting_stats['SLG'].astype(float).round(3).apply('{:.3f}'.format)
     hitting_stats['OPS'] = hitting_stats['OPS'].astype(float).round(3).apply('{:.3f}'.format)
@@ -225,7 +272,10 @@ def create_sheet(team_id):
     hitting_stats['wRAA'] = hitting_stats['wRAA'].astype(float).round(2)
     hitting_stats['wRAA_per_100'] = hitting_stats['wRAA_per_100'].astype(float).round(2)
 
-    for index, colname in enumerate(['Player', 'Year', 'Pos', 'PA', 'H', 'HR', 'BA', 'SLG', 'OPS', 'wRAA', 'wRAA/100']):
+    hitting_stats = hitting_stats.sort_values(by=['wRAA_per_100'], ascending=False)
+    hitting_stats = hitting_stats.reset_index(drop=True)
+
+    for index, colname in enumerate(['Team', 'Player', 'Year', 'Pos', 'PA', 'H', 'HR', 'BA', 'SLG', 'OPS', 'wRAA', 'wRAA/100']):
         cell = sheet.cell(row=len(conference_hitting_stats) + 8, column=index + 1)
         cell.value = colname
         cell.font = Font(bold=True)
@@ -233,17 +283,41 @@ def create_sheet(team_id):
 
 
     for index, row in hitting_stats.iterrows():
-        for col in range(1, 12):
+        for col in range(1, 13):
             cell = sheet.cell(row=index + len(conference_hitting_stats) + 9, column=col)
             cell.value = row[col - 1]
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+            if not hitting_stats['ncaa_university_name'][index] == team_name:
+                cell.fill = openpyxl.styles.PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
+            elif hitting_stats['Name'][index] in players_leaving:
+                cell.fill = openpyxl.styles.PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+            else:
+                cell.fill = openpyxl.styles.PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
+        
 
     # Set column widths
     sheet.column_dimensions['A'].width = 25
-    sheet.column_dimensions['B'].width = 6
+    sheet.column_dimensions['B'].width = 25
     sheet.column_dimensions['C'].width = 6
+    sheet.column_dimensions['D'].width = 6
 
     sheet.title = "Hitting"
+
+    returning_color_cell = sheet.cell(row=len(conference_hitting_stats) + len(hitting_stats) + 12, column=1)
+    returning_color_cell.value = "Returners"
+    returning_color_cell.fill = openpyxl.styles.PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
+    returning_color_cell.font = Font(bold=True)
+
+    transfer_color_cell = sheet.cell(row=len(conference_hitting_stats) + len(hitting_stats) + 13, column=1)
+    transfer_color_cell.value = "Transfers"
+    transfer_color_cell.fill = openpyxl.styles.PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
+    transfer_color_cell.font = Font(bold=True)
+
+    leaving_color_cell = sheet.cell(row=len(conference_hitting_stats) + len(hitting_stats) + 14, column=1)
+    leaving_color_cell.value = "Leaving"
+    leaving_color_cell.fill = openpyxl.styles.PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+    leaving_color_cell.font = Font(bold=True)
+
 
     sheet = workbook.create_sheet("Pitching")
 
@@ -361,10 +435,10 @@ def create_sheet(team_id):
                 cell.fill = openpyxl.styles.PatternFill(start_color='FFF157', end_color='FFF157', fill_type='solid')
                 
     query = """
-        SELECT concat(first_name, ' ', last_name) as Name, Yr, App, IP, W, L, SO, HA, HR_A, WHIP, HA / (BF - BB - HB - SHA - SFA) AS BAA, FIP
+        SELECT diamond_pitching_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, App, IP, W, L, SO, HA, HR_A, WHIP, HA / (BF - BB - HB - SHA - SFA) AS BAA, FIP
         FROM diamond_pitching_full
         LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_pitching_full.ncaa_university_name
-        WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {}
+        WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {} AND BF > 0
         ORDER BY FIP
     """.format(team_id)
 
@@ -374,11 +448,31 @@ def create_sheet(team_id):
     columns = [desc[0] for desc in cursor.description]  
     pitching_stats = pd.DataFrame(rows, columns=columns)  
 
+    query = """
+        SELECT diamond_pitching_full.ncaa_university_name, concat(first_name, ' ', last_name) as Name, Yr, App, IP, W, L, SO, HA, HR_A, WHIP, HA / (BF - BB - HB - SHA - SFA) AS BAA, FIP
+        FROM diamond_pitching_full
+        LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_pitching_full.ncaa_university_name
+        WHERE cycle_id = 6 AND CONCAT(diamond_pitching_full.first_name, ' ', diamond_pitching_full.last_name) IN {} AND BF > 0
+    """.format(tuple(transfers_in_df['Player'].tolist()))
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    transfers_in_stats = pd.DataFrame(rows, columns=columns)
+
+    pitching_stats = pd.concat([pitching_stats, transfers_in_stats], ignore_index=True)
+    pitching_stats = pd.merge(pitching_stats, transfers_in_df, left_on=['Name', 'ncaa_university_name'], right_on=['Player', 'Team'], how='left')
+    pitching_stats = pitching_stats.drop(columns=['Team', 'Player'])
+
     pitching_stats['BAA'] = pitching_stats['BAA'].astype(float).round(3).apply('{:.3f}'.format)
     pitching_stats['WHIP'] = pitching_stats['WHIP'].astype(float).round(2)
     pitching_stats['FIP'] = pitching_stats['FIP'].astype(float).round(2)
 
-    for index, colname in enumerate(['Player', 'Year', 'App', 'IP', 'W', 'L', 'SO', 'HA', 'HR A', 'WHIP', 'BAA', 'FIP']):
+    pitching_stats = pitching_stats.sort_values(by=['FIP'])
+    pitching_stats = pitching_stats.reset_index(drop=True)
+
+    for index, colname in enumerate(['Team', 'Player', 'Year', 'App', 'IP', 'W', 'L', 'SO', 'HA', 'HR A', 'WHIP', 'BAA', 'FIP']):
         cell = sheet.cell(row=len(conference_pitching_stats) + 8, column=index + 1)
         cell.value = colname
         cell.font = Font(bold=True)
@@ -386,16 +480,37 @@ def create_sheet(team_id):
 
 
     for index, row in pitching_stats.iterrows():
-        for col in range(1, 13):
+        for col in range(1, 14):
             cell = sheet.cell(row=index + len(conference_pitching_stats) + 9, column=col)
             cell.value = row[col - 1]
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+            if not pitching_stats['ncaa_university_name'][index] == team_name:
+                cell.fill = openpyxl.styles.PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
+            elif pitching_stats['Name'][index] in players_leaving:
+                cell.fill = openpyxl.styles.PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+            else:
+                cell.fill = openpyxl.styles.PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
 
     # Set column widths
     sheet.column_dimensions['A'].width = 25
-    sheet.column_dimensions['B'].width = 10
+    sheet.column_dimensions['B'].width = 25
+    sheet.column_dimensions['C'].width = 12
 
-    cursor.close()
+    returning_color_cell = sheet.cell(row=len(conference_pitching_stats) + len(pitching_stats) + 12, column=1)
+    returning_color_cell.value = "Returners"
+    returning_color_cell.fill = openpyxl.styles.PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
+    returning_color_cell.font = Font(bold=True)
+
+    transfer_color_cell = sheet.cell(row=len(conference_pitching_stats) + len(pitching_stats) + 13, column=1)
+    transfer_color_cell.value = "Transfers"
+    transfer_color_cell.fill = openpyxl.styles.PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
+    transfer_color_cell.font = Font(bold=True)
+
+    leaving_color_cell = sheet.cell(row=len(conference_pitching_stats) + len(pitching_stats) + 14, column=1)
+    leaving_color_cell.value = "Leaving"
+    leaving_color_cell.fill = openpyxl.styles.PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+    leaving_color_cell.font = Font(bold=True)
+
     return workbook
 
 # Sort team names alphabetically
@@ -406,8 +521,31 @@ selected_team = st.selectbox("Select Team", sorted_teams)
 
 selected_team_id = teams[teams['ncaa_university_name'] == selected_team]['ncaa_universityID'].tolist()[0]
 
+query = """
+    SELECT CONCAT(first_name, ' ', last_name) as Player
+    FROM diamond_position_full
+    WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
+
+    UNION
+
+    SELECT CONCAT(first_name, ' ', last_name) as Player
+    FROM diamond_pitching_full
+    WHERE cycle_id = 6 AND first_name NOT REGEXP '[0-9.]' AND ncaa_university_name = '{}'
+
+    ORDER BY SUBSTRING_INDEX(Player, ' ', 1);
+""".format(selected_team, selected_team)
+
+cursor.execute(query)
+
+rows = cursor.fetchall()
+columns = [desc[0] for desc in cursor.description]
+team_roster = pd.DataFrame(rows, columns=columns)
+
 if not pd.isnull(selected_team_id):
-    workbook = create_sheet(selected_team_id)
+    transfers_in = st.multiselect("Transfers In", all_players['Player'].tolist())
+    players_leaving = st.multiselect("Players Leaving", team_roster['Player'].tolist())
+
+    workbook = create_sheet(selected_team_id, transfers_in, players_leaving)
 
     with NamedTemporaryFile() as tmp:
      workbook.save(tmp.name)
@@ -417,5 +555,7 @@ if not pd.isnull(selected_team_id):
     data=data,
     mime='xlsx',
     file_name="{} Comp Report.xlsx".format(selected_team))
+
+cursor.close()
 
 connection.close()
