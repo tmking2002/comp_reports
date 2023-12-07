@@ -1,7 +1,6 @@
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, Border, Side
-from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 import streamlit as st
 from dotenv import load_dotenv
@@ -39,8 +38,6 @@ def create_sheet(team_id):
 
     # Merge cells A1 to K1
     sheet.merge_cells('A1:K1')
-    sheet.merge_cells('P1:Z1')
-
     font = Font(size=36, bold=True)
     for col in range(1, 26):
         cell = sheet.cell(row=1, column=col)
@@ -210,7 +207,7 @@ def create_sheet(team_id):
     query = """
         SELECT concat(first_name, ' ', last_name) as Name, Yr, Pos, PA, H, HR, BA, SlgPct as SLG, OBPct + SlgPct as OPS, wRAA, wRAA / PA * 100 as wRAA_per_100
         FROM diamond_position_full
-        left join ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_position_full.ncaa_university_name
+        LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_position_full.ncaa_university_name
         WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {}
         ORDER BY wRAA_per_100 DESC
     """.format(team_id)
@@ -241,10 +238,6 @@ def create_sheet(team_id):
             cell.value = row[col - 1]
             cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
 
-    cursor.close()
-
-    
-
     # Set column widths
     sheet.column_dimensions['A'].width = 25
     sheet.column_dimensions['B'].width = 6
@@ -252,6 +245,157 @@ def create_sheet(team_id):
 
     sheet.title = "Hitting"
 
+    sheet = workbook.create_sheet("Pitching")
+
+    # Merge cells A1 to K1
+    sheet.merge_cells('A1:K1')
+    font = Font(size=36, bold=True)
+    for col in range(1, 26):
+        cell = sheet.cell(row=1, column=col)
+        cell.font = font
+
+    # Set the value of the merged cells to 'Hitting Stats' and center align the text
+    sheet['A1'] = 'Pitching Stats'
+    sheet['A1'].alignment = Alignment(horizontal='center', vertical='center')
+
+    # Add border to cells A1 to K1
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    for col in range(1, 12):
+        cell = sheet.cell(row=1, column=col)
+        cell.border = border
+
+    # Get team name
+
+    query = """
+        SELECT ncaa_university_name
+        FROM ncaa_university_link
+        WHERE ncaa_universityID = {}
+    """.format(team_id)
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    team_name = rows[0][0]
+
+    # Get name of conference and conference_id
+
+    query = """
+        SELECT university_conference.ncaa_universityID, conference.conference, conference.conference_id
+        FROM university_conference
+        LEFT JOIN conference on university_conference.conference_id = conference.conference_id
+        WHERE university_conference.ncaa_universityID = {}
+    """.format(team_id)
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    conference = pd.DataFrame(rows, columns=columns)
+
+    # Set the value of merged cells E4:G4 to the conference name
+    sheet.merge_cells('D4:G4')
+    sheet['D4'] = conference['conference'][0]
+    sheet['D4'].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+    sheet['D4'].font = Font(size=16, bold=True)
+
+    sheet.merge_cells('D5:E5')
+    sheet['D5'] = 'Team'
+    sheet['D5'].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+    sheet['D5'].font = Font(bold = True)
+
+    sheet['F5'] = 'FIP'
+    sheet['F5'].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+    sheet['F5'].font = Font(bold = True)
+
+    sheet['G5'] = 'Record'
+    sheet['G5'].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+    sheet['G5'].font = Font(bold = True)
+
+    query = """
+        SELECT ncaa_university_link.ncaa_university_name, SUM(FIP * IP) / SUM(IP) as FIP
+        FROM diamond_pitching_full
+        LEFT JOIN ncaa_university_link ON ncaa_university_link.ncaa_university_name = diamond_pitching_full.ncaa_university_name
+        WHERE ncaa_university_link.ncaa_university_name in {} AND cycle_id = 6
+        GROUP BY ncaa_university_link.ncaa_university_name
+        ORDER BY FIP
+    """.format(tuple(conference_teams['ncaa_university_name'].tolist()))
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    conference_pitching_stats = pd.DataFrame(rows, columns=columns)
+
+    conference_pitching_stats = pd.merge(conference_pitching_stats, conference_records, left_on='ncaa_university_name', right_on="ncaa_university_name")
+
+    for index, row in conference_pitching_stats.iterrows():
+        sheet['D{}'.format(index + 6)] = row['ncaa_university_name']
+        sheet['D{}'.format(index + 6)].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+        sheet.merge_cells('D{}:E{}'.format(index + 6, index + 6))
+        sheet['F{}'.format(index + 6)] = round(row['FIP'], 2)
+        sheet['F{}'.format(index + 6)].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+        sheet['G{}'.format(index + 6)] = row['record']
+        sheet['G{}'.format(index + 6)].alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+
+    for col in range(4, 8):
+        for row in range(4, len(conference_pitching_stats) + 6):
+            cell = sheet.cell(row=row, column=col)
+            if row == 4 and col == 4:
+                cell.border = openpyxl.styles.Border(top=openpyxl.styles.Side(style='thin'), left=openpyxl.styles.Side(style='thin'))
+            elif row == 4 and col == 7:
+                cell.border = openpyxl.styles.Border(top=openpyxl.styles.Side(style='thin'), right=openpyxl.styles.Side(style='thin'))
+            elif row == len(conference_pitching_stats) + 5 and col == 4:
+                cell.border = openpyxl.styles.Border(bottom=openpyxl.styles.Side(style='thin'), left=openpyxl.styles.Side(style='thin'))
+            elif row == len(conference_pitching_stats) + 5 and col == 7:
+                cell.border = openpyxl.styles.Border(bottom=openpyxl.styles.Side(style='thin'), right=openpyxl.styles.Side(style='thin'))
+            elif row == 4:
+                cell.border = openpyxl.styles.Border(top=openpyxl.styles.Side(style='thin'))
+            elif row == len(conference_pitching_stats) + 5:
+                cell.border = openpyxl.styles.Border(bottom=openpyxl.styles.Side(style='thin'))
+            elif col == 4:
+                cell.border = openpyxl.styles.Border(left=openpyxl.styles.Side(style='thin'))
+            elif col == 7:
+                cell.border = openpyxl.styles.Border(right=openpyxl.styles.Side(style='thin'))
+            
+            if cell.value == team_name:
+                cell.fill = openpyxl.styles.PatternFill(start_color='FFF157', end_color='FFF157', fill_type='solid')
+                
+    query = """
+        SELECT concat(first_name, ' ', last_name) as Name, Yr, App, IP, W, L, SO, HA, HR_A, WHIP, HA / (BF - BB - HB - SHA - SFA) AS BAA, FIP
+        FROM diamond_pitching_full
+        LEFT JOIN ncaa_university_link on ncaa_university_link.ncaa_university_name = diamond_pitching_full.ncaa_university_name
+        WHERE cycle_id = 6 AND ncaa_university_link.ncaa_universityID = {}
+        ORDER BY FIP
+    """.format(team_id)
+
+    cursor.execute(query)
+
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]  
+    pitching_stats = pd.DataFrame(rows, columns=columns)  
+
+    pitching_stats['BAA'] = pitching_stats['BAA'].astype(float).round(3).apply('{:.3f}'.format)
+    pitching_stats['WHIP'] = pitching_stats['WHIP'].astype(float).round(2)
+    pitching_stats['FIP'] = pitching_stats['FIP'].astype(float).round(2)
+
+    for index, colname in enumerate(['Player', 'Year', 'App', 'IP', 'W', 'L', 'SO', 'HA', 'HR A', 'WHIP', 'BAA', 'FIP']):
+        cell = sheet.cell(row=len(conference_pitching_stats) + 8, column=index + 1)
+        cell.value = colname
+        cell.font = Font(bold=True)
+        cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+
+
+    for index, row in pitching_stats.iterrows():
+        for col in range(1, 13):
+            cell = sheet.cell(row=index + len(conference_pitching_stats) + 9, column=col)
+            cell.value = row[col - 1]
+            cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+
+    # Set column widths
+    sheet.column_dimensions['A'].width = 25
+    sheet.column_dimensions['B'].width = 10
+
+    cursor.close()
     return workbook
 
 # Sort team names alphabetically
@@ -270,11 +414,8 @@ if not pd.isnull(selected_team_id):
      data = BytesIO(tmp.read())
 
     st.download_button("Download",
-     data=data,
-     mime='xlsx',
-     file_name="{} Comp Report.xlsx".format(selected_team))
-
-
-
+    data=data,
+    mime='xlsx',
+    file_name="{} Comp Report.xlsx".format(selected_team))
 
 connection.close()
