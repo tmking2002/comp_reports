@@ -278,7 +278,7 @@ def create_sheet(team_id, transfers_in, players_leaving):
     hitting_stats['wRAA'] = hitting_stats['wRAA'].astype(float).round(2)
     hitting_stats['wRAA_per_100'] = hitting_stats['wRAA_per_100'].astype(float).round(2)
 
-    hitting_stats = hitting_stats.sort_values(by=['wRAA_per_100'], ascending=False)
+    hitting_stats = hitting_stats.sort_values(by=['wRAA'], ascending=False)
     hitting_stats = hitting_stats.reset_index(drop=True)
 
     for index, colname in enumerate(['Team', 'Player', 'Year', 'Pos', 'PA', 'H', 'HR', 'BA', 'SLG', 'OPS', 'wRAA', 'wRAA/100']):
